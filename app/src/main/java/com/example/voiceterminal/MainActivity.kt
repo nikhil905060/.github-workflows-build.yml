@@ -3,9 +3,13 @@ package com.example.voiceterminal
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.widget.Button
 import android.widget.EditText
@@ -34,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scrollView: ScrollView
 
     private val defaultApiKey = "AIzaSyDYtFapNjj5jqiXs2wtx0KRQB3dJodS0BQ"
+    private var isTorchOn = false
 
     private val voiceLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -60,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         val btnMic: Button = findViewById(R.id.btnMic)
         val btnMenu: Button = findViewById(R.id.btnMenu)
 
-        checkPermissions()
+        checkAllPermissions()
 
         btnSend.setOnClickListener {
             val text = etCommandInput.text.toString().trim()
@@ -87,21 +92,21 @@ class MainActivity : AppCompatActivity() {
     private fun showTerminalMenu() {
         val options = arrayOf(
             "🔑 Set Gemini API Key",
+            "🔔 Grant Notification Access (Required)",
             "🧹 Clear Terminal Output",
             "📱 Show Device Specs",
-            "📂 Check PWD (Current Directory)",
-            "❓ Help / Usage Guide"
+            "📋 List Installed Apps"
         )
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("[ TERMINAL SETTINGS ]")
+            .setTitle("[ CONTROL MENU ]")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> showApiKeyDialog()
-                    1 -> clearScreen()
-                    2 -> showDeviceInfo()
-                    3 -> executeCommand("pwd")
-                    4 -> showHelpGuide()
+                    1 -> startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                    2 -> clearScreen()
+                    3 -> showDeviceInfo()
+                    4 -> listInstalledApps()
                 }
             }
             .setNegativeButton("Close", null)
@@ -125,15 +130,23 @@ class MainActivity : AppCompatActivity() {
         scrollToBottom()
     }
 
-    private fun showHelpGuide() {
-        val help = """
-            [HELP & USAGE]
-            - Voice Input: Press 'Mic' and speak in Hindi/Hinglish (e.g. 'download folder ki files dikhao').
-            - Direct Command: Type pure shell commands like 'uname -a' or 'uptime'.
-            - Custom Key: Tap [MENU] -> 'Set Gemini API Key'.
-        """.trimIndent()
-        tvTerminalOutput.append("\n$help\n\n$ ")
-        scrollToBottom()
+    private fun listInstalledApps() {
+        tvTerminalOutput.append("\n[FETCHING INSTALLED APPS...]\n")
+        thread {
+            val pm = packageManager
+            val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            val builder = StringBuilder()
+            for (app in packages) {
+                if ((app.flags and ApplicationInfo.FLAG_SYSTEM) == 0) {
+                    val label = pm.getApplicationLabel(app).toString()
+                    builder.append("- ").append(label).append(" (").append(app.packageName).append(")\n")
+                }
+            }
+            runOnUiThread {
+                tvTerminalOutput.append(builder.toString() + "\n$ ")
+                scrollToBottom()
+            }
+        }
     }
 
     private fun showApiKeyDialog() {
@@ -148,7 +161,7 @@ class MainActivity : AppCompatActivity() {
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Config: Gemini API Key")
-            .setMessage("Leave empty to use the system default key.")
+            .setMessage("Leave empty to use system default key.")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newKey = input.text.toString().trim()
@@ -169,7 +182,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun processNaturalLanguageWithAI(promptText: String) {
-        tvTerminalOutput.append("\n[You]: $promptText\n[AI Processing...]\n")
+        tvTerminalOutput.append("\n[You]: $promptText\n[AI Routing...]\n")
         scrollToBottom()
 
         val activeKey = getActiveApiKey()
@@ -182,7 +195,20 @@ class MainActivity : AppCompatActivity() {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
 
-                val systemInstruction = "Convert the user request (which might be in Hindi, Hinglish, or broken English) into a single executable Android shell / Linux command. Return ONLY the raw command, no backticks, no markdown, no explanation. Example: 'download folder dikhao' -> 'ls /sdcard/Download'."
+                val systemInstruction = """
+                    You are an Android OS Master Controller router. 
+                    Analyze the user prompt (Hindi, English, Hinglish) and map it to EXACTLY ONE prefix command:
+
+                    1. Flashlight on/off -> ACTION:TORCH_ON or ACTION:TORCH_OFF
+                    2. Volume increase/decrease/mute -> ACTION:VOL_UP or ACTION:VOL_DOWN or ACTION:VOL_MUTE
+                    3. Notifications check -> ACTION:READ_NOTIFICATIONS
+                    4. Open device settings/wifi/bluetooth -> ACTION:OPEN_SETTINGS or ACTION:OPEN_WIFI or ACTION:OPEN_BLUETOOTH
+                    5. Go to Home screen -> ACTION:HOME
+                    6. Open any application -> OPEN:<AppName> (e.g. 'OPEN:YouTube', 'OPEN:WhatsApp', 'OPEN:Camera')
+                    7. Linux shell / files task -> CMD:<shell command> (e.g. 'CMD:ls /sdcard/Download')
+
+                    Output ONLY the command string. No markdown, no backticks, no explanations.
+                """.trimIndent()
 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().apply {
@@ -199,7 +225,7 @@ class MainActivity : AppCompatActivity() {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
                     val response = reader.readText()
                     val jsonResponse = JSONObject(response)
-                    val generatedCommand = jsonResponse
+                    val generatedAction = jsonResponse
                         .getJSONArray("candidates")
                         .getJSONObject(0)
                         .getJSONObject("content")
@@ -210,7 +236,7 @@ class MainActivity : AppCompatActivity() {
                         .replace("`", "")
 
                     runOnUiThread {
-                        executeCommand(generatedCommand)
+                        handleAiAction(generatedAction)
                     }
                 } else {
                     val err = conn.errorStream?.bufferedReader()?.readText() ?: "HTTP $responseCode"
@@ -225,6 +251,137 @@ class MainActivity : AppCompatActivity() {
             }
             scrollToBottom()
         }
+    }
+
+    private fun handleAiAction(action: String) {
+        when {
+            action.startsWith("ACTION:") -> {
+                val act = action.removePrefix("ACTION:").trim()
+                executeDeviceAction(act)
+            }
+            action.startsWith("OPEN:") -> {
+                val target = action.removePrefix("OPEN:").trim()
+                tvTerminalOutput.append("[Action]: Opening $target...\n")
+                launchApp(target)
+            }
+            action.startsWith("CMD:") -> {
+                val cmd = action.removePrefix("CMD:").trim()
+                executeCommand(cmd)
+            }
+            else -> {
+                executeCommand(action)
+            }
+        }
+    }
+
+    private fun executeDeviceAction(actionType: String) {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+
+        try {
+            when (actionType) {
+                "TORCH_ON" -> {
+                    val cameraId = cameraManager.cameraIdList[0]
+                    cameraManager.setTorchMode(cameraId, true)
+                    isTorchOn = true
+                    tvTerminalOutput.append("[Success]: Flashlight Turned ON\n$ ")
+                }
+                "TORCH_OFF" -> {
+                    val cameraId = cameraManager.cameraIdList[0]
+                    cameraManager.setTorchMode(cameraId, false)
+                    isTorchOn = false
+                    tvTerminalOutput.append("[Success]: Flashlight Turned OFF\n$ ")
+                }
+                "VOL_UP" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                    tvTerminalOutput.append("[Success]: Volume Increased\n$ ")
+                }
+                "VOL_DOWN" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                    tvTerminalOutput.append("[Success]: Volume Decreased\n$ ")
+                }
+                "VOL_MUTE" -> {
+                    audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                    tvTerminalOutput.append("[Success]: Volume Muted\n$ ")
+                }
+                "OPEN_SETTINGS" -> {
+                    startActivity(Intent(Settings.ACTION_SETTINGS))
+                    tvTerminalOutput.append("[Success]: Settings opened\n$ ")
+                }
+                "OPEN_WIFI" -> {
+                    startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                    tvTerminalOutput.append("[Success]: WiFi Settings opened\n$ ")
+                }
+                "OPEN_BLUETOOTH" -> {
+                    startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    tvTerminalOutput.append("[Success]: Bluetooth Settings opened\n$ ")
+                }
+                "HOME" -> {
+                    val startMain = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(startMain)
+                    tvTerminalOutput.append("[Success]: Sent to Home Screen\n$ ")
+                }
+                "READ_NOTIFICATIONS" -> {
+                    synchronized(NotificationMonitor.notificationLogs) {
+                        if (NotificationMonitor.notificationLogs.isEmpty()) {
+                            tvTerminalOutput.append("[Notifications]: No new notifications captured. (Make sure Notification Access is granted in MENU)\n$ ")
+                        } else {
+                            tvTerminalOutput.append("\n--- RECENT NOTIFICATIONS ---\n")
+                            for (log in NotificationMonitor.notificationLogs) {
+                                tvTerminalOutput.append(log + "\n")
+                            }
+                            tvTerminalOutput.append("----------------------------\n$ ")
+                        }
+                    }
+                }
+                else -> {
+                    tvTerminalOutput.append("[Unknown Action]: $actionType\n$ ")
+                }
+            }
+        } catch (e: Exception) {
+            tvTerminalOutput.append("[Action Failed]: ${e.message}\n$ ")
+        }
+        scrollToBottom()
+    }
+
+    private fun launchApp(target: String) {
+        val pm = packageManager
+        var intent: Intent? = null
+        val lowerTarget = target.lowercase(Locale.ROOT)
+
+        when {
+            lowerTarget.contains("setting") -> intent = Intent(Settings.ACTION_SETTINGS)
+            lowerTarget.contains("youtube") -> intent = pm.getLaunchIntentForPackage("com.google.android.youtube")
+            lowerTarget.contains("whatsapp") -> intent = pm.getLaunchIntentForPackage("com.whatsapp")
+            lowerTarget.contains("chrome") -> intent = pm.getLaunchIntentForPackage("com.android.chrome")
+            lowerTarget.contains("camera") -> intent = Intent("android.media.action.IMAGE_CAPTURE")
+        }
+
+        if (intent == null) {
+            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            for (app in installedApps) {
+                val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
+                if (label.contains(lowerTarget) || app.packageName.lowercase(Locale.ROOT).contains(lowerTarget)) {
+                    intent = pm.getLaunchIntentForPackage(app.packageName)
+                    if (intent != null) break
+                }
+            }
+        }
+
+        if (intent != null) {
+            try {
+                startActivity(intent)
+                tvTerminalOutput.append("[Success]: $target launched.\n$ ")
+            } catch (e: Exception) {
+                tvTerminalOutput.append("[Failed to launch]: ${e.message}\n$ ")
+            }
+        } else {
+            tvTerminalOutput.append("[Error]: App '$target' not found on this device.\n$ ")
+        }
+        scrollToBottom()
     }
 
     private fun executeCommand(command: String) {
@@ -283,9 +440,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkPermissions() {
+    private fun checkAllPermissions() {
+        val needed = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 101)
+            needed.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.CAMERA)
+        }
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 101)
         }
     }
 
