@@ -37,8 +37,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etCommandInput: EditText
     private lateinit var scrollView: ScrollView
 
-    private val defaultApiKey = "AIzaSyDYtFapNjj5jqiXs2wtx0KRQB3dJodS0BQ"
-
     private val voiceLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -85,7 +83,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getActiveApiKey(): String {
         val prefs = getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
-        return prefs.getString("custom_api_key", defaultApiKey) ?: defaultApiKey
+        return prefs.getString("custom_api_key", "") ?: ""
     }
 
     private fun showTerminalMenu() {
@@ -149,8 +147,8 @@ class MainActivity : AppCompatActivity() {
     private fun showApiKeyDialog() {
         val currentKey = getActiveApiKey()
         val input = EditText(this).apply {
-            hint = "Paste custom Gemini API Key"
-            setText(if (currentKey == defaultApiKey) "" else currentKey)
+            hint = "Paste Gemini API Key"
+            setText(currentKey)
         }
 
         AlertDialog.Builder(this)
@@ -159,33 +157,36 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Save") { _, _ ->
                 val newKey = input.text.toString().trim()
                 val prefs = getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
-                if (newKey.isNotEmpty()) {
-                    prefs.edit().putString("custom_api_key", newKey).apply()
-                    Toast.makeText(this, "API Key Saved", Toast.LENGTH_SHORT).show()
-                } else {
-                    prefs.edit().remove("custom_api_key").apply()
-                    Toast.makeText(this, "Reset to Default Key", Toast.LENGTH_SHORT).show()
-                }
+                prefs.edit().putString("custom_api_key", newKey).apply()
+                Toast.makeText(this, "API Key Saved", Toast.LENGTH_SHORT).show()
+                tvTerminalOutput.append("\n[System]: API Key saved successfully.\n$ ")
+                scrollToBottom()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun processNaturalLanguageWithAI(promptText: String) {
+        val activeKey = getActiveApiKey()
+        if (activeKey.isEmpty()) {
+            tvTerminalOutput.append("\n[System Error]: API Key set nahi hai! Menu -> 'Set Gemini API Key' me jakar key paste karo.\n$ ")
+            scrollToBottom()
+            return
+        }
+
         tvTerminalOutput.append("\n[You]: $promptText\n[AI Thinking...]\n")
         scrollToBottom()
 
-        val activeKey = getActiveApiKey()
-
         thread {
             try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$activeKey")
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("x-goog-api-key", activeKey)
                 conn.doOutput = true
 
-                val systemInstruction = "Convert user request into one of these: ACTION:TORCH_ON, ACTION:TORCH_OFF, ACTION:VOL_UP, ACTION:VOL_DOWN, ACTION:VOL_MUTE, ACTION:READ_NOTIFICATIONS, ACTION:HOME, OPEN:<AppName>, or CMD:<shell command>. Output ONLY the single command."
+                val systemInstruction = "Convert user request into one of these: ACTION:TORCH_ON, ACTION:TORCH_OFF, ACTION:VOL_UP, ACTION:VOL_DOWN, ACTION:VOL_MUTE, ACTION:READ_NOTIFICATIONS, ACTION:HOME, OPEN:<AppName>, or CMD:<shell command>. Output ONLY the single command without markdown or quotes."
 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().apply {
