@@ -503,11 +503,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun scrollToBottom() {
+        private fun scrollToBottom() {
         runOnUiThread {
             scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
-                }
+        }
     }
 }
-}
+
 
