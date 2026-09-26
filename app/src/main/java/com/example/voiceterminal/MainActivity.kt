@@ -90,7 +90,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTerminalMenu() {
         val options = arrayOf(
-            "Set Gemini API Key",
+            "Set OpenRouter API Key",
             "Grant Notification Access",
             "Clear Terminal",
             "Device Information",
@@ -149,19 +149,19 @@ class MainActivity : AppCompatActivity() {
     private fun showApiKeyDialog() {
         val currentKey = getActiveApiKey()
         val input = EditText(this).apply {
-            hint = "Paste Gemini API Key"
+            hint = "Paste OpenRouter Key (sk-or-...)"
             setText(currentKey)
         }
 
         AlertDialog.Builder(this)
-            .setTitle("Gemini API Key")
+            .setTitle("OpenRouter API Key")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newKey = input.text.toString().trim()
                 val prefs = getSharedPreferences("AppSettings", Context.MODE_PRIVATE)
                 prefs.edit().putString("custom_api_key", newKey).apply()
                 Toast.makeText(this, "API Key Saved", Toast.LENGTH_SHORT).show()
-                tvTerminalOutput.append("\n[System]: API Key saved successfully.\n$ ")
+                tvTerminalOutput.append("\n[System]: OpenRouter API Key saved.\n$ ")
                 scrollToBottom()
             }
             .setNegativeButton("Cancel", null)
@@ -171,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     private fun processNaturalLanguageWithAI(promptText: String) {
         val activeKey = getActiveApiKey()
         if (activeKey.isEmpty()) {
-            tvTerminalOutput.append("\n[System Error]: API Key set nahi hai! Menu -> 'Set Gemini API Key' me paste karo.\n$ ")
+            tvTerminalOutput.append("\n[System Error]: API Key missing! Menu -> 'Set OpenRouter API Key' me paste karo.\n$ ")
             scrollToBottom()
             return
         }
@@ -181,46 +181,56 @@ class MainActivity : AppCompatActivity() {
 
         thread {
             try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
+                val url = URL("https://openrouter.ai/api/v1/chat/completions")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("x-goog-api-key", activeKey)
+                conn.setRequestProperty("Authorization", "Bearer $activeKey")
+                conn.setRequestProperty("HTTP-Referer", "https://github.com/nikhil905060/VoiceTerminal")
+                conn.setRequestProperty("X-Title", "VoiceTerminal")
                 conn.doOutput = true
 
-                val systemInstruction = """
-                    You are a voice assistant operating a terminal on an unrooted Android device.
-                    Your goal: ALWAYS fulfill the user intent as far as possible (Best Effort).
+                val systemPrompt = """
+                    You are a voice assistant operating an unrooted Android terminal.
+                    Goal: Fulfill the user intent as far as possible (Best Effort).
                     If a direct toggle is restricted by Android OS (like mobile data, airplane mode, bluetooth toggle, hotspot), redirect them by opening the exact settings panel.
-                    Choose ONE prefix:
+                    Choose EXACTLY ONE prefix:
                     ACTION:TORCH_ON (turn flashlight on)
                     ACTION:TORCH_OFF (turn flashlight off)
                     ACTION:VOL_UP (raise volume)
                     ACTION:VOL_DOWN (lower volume)
                     ACTION:VOL_MUTE (mute volume)
-                    ACTION:DATA_SETTINGS (for data on/off, internet, cellular)
-                    ACTION:WIFI_SETTINGS (for wifi settings)
-                    ACTION:BLUETOOTH_SETTINGS (for bluetooth)
-                    ACTION:HOTSPOT_SETTINGS (for hotspot / tethering)
-                    ACTION:AIRPLANE_SETTINGS (for flight / airplane mode)
-                    ACTION:DISPLAY_SETTINGS (for brightness / screen timeout)
-                    ACTION:BATTERY_SETTINGS (for battery / power saving)
-                    ACTION:READ_NOTIFICATIONS (to view recent notifications)
+                    ACTION:DATA_SETTINGS (mobile data, cellular network)
+                    ACTION:WIFI_SETTINGS (wifi settings)
+                    ACTION:BLUETOOTH_SETTINGS (bluetooth)
+                    ACTION:HOTSPOT_SETTINGS (hotspot / tethering)
+                    ACTION:AIRPLANE_SETTINGS (flight mode)
+                    ACTION:DISPLAY_SETTINGS (brightness / screen)
+                    ACTION:BATTERY_SETTINGS (battery info / power)
+                    ACTION:READ_NOTIFICATIONS (view captured notifications)
                     ACTION:HOME (go to home screen)
                     ACTION:CAMERA (open camera)
-                    OPEN:<AppName> (launch any installed app, e.g. OPEN:YouTube, OPEN:WhatsApp, OPEN:Chrome, OPEN:Gallery, OPEN:Calculator)
+                    OPEN:<AppName> (launch any installed app, e.g. OPEN:YouTube, OPEN:WhatsApp, OPEN:Chrome)
                     SEARCH:<query> (search Google in browser)
-                    CMD:<shell command> (only safe commands like ls, pwd, date, uname, uptime)
-                    SAY:<response> (for normal conversations, greetings, questions)
-                    Respond ONLY with that single command, no quotes, no markdown.
+                    CMD:<shell command> (safe commands like ls, pwd, date, uname)
+                    SAY:<response> (general chit-chat, answers)
+                    Output ONLY that single command. No markdown, no commentary.
                 """.trimIndent()
 
+                val messages = JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", promptText)
+                    })
+                }
+
                 val jsonBody = JSONObject().apply {
-                    put("contents", JSONArray().put(JSONObject().apply {
-                        put("parts", JSONArray().put(JSONObject().apply {
-                            put("text", "$systemInstruction\nUser: $promptText")
-                        }))
-                    }))
+                    put("model", "meta-llama/llama-3.1-8b-instruct:free")
+                    put("messages", messages)
                 }
 
                 OutputStreamWriter(conn.outputStream).use { it.write(jsonBody.toString()) }
@@ -231,12 +241,10 @@ class MainActivity : AppCompatActivity() {
                     val response = reader.readText()
                     val jsonResponse = JSONObject(response)
                     val action = jsonResponse
-                        .getJSONArray("candidates")
+                        .getJSONArray("choices")
                         .getJSONObject(0)
-                        .getJSONObject("content")
-                        .getJSONArray("parts")
-                        .getJSONObject(0)
-                        .getString("text")
+                        .getJSONObject("message")
+                        .getString("content")
                         .trim()
                         .replace("`", "")
 
@@ -304,7 +312,7 @@ class MainActivity : AppCompatActivity() {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
                     startActivity(intent)
-                    tvTerminalOutput.append("[Best Effort]: Android security restricts direct data toggle. Opened Network Settings for you.\n$ ")
+                    tvTerminalOutput.append("[Best Effort]: Android security restricts direct data toggle. Opened Network Settings.\n$ ")
                 }
                 "WIFI_SETTINGS" -> {
                     val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
@@ -453,8 +461,8 @@ class MainActivity : AppCompatActivity() {
                 var line: String?
                 var hasOutput = false
 
-                while (reader.readLine().also { line = it } != null) {
-                                        hasOutput = true
+                               while (reader.readLine().also { line = it } != null) {
+                    hasOutput = true
                     val out = line
                     runOnUiThread { tvTerminalOutput.append(out + "\n") }
                 }
@@ -503,11 +511,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-        private fun scrollToBottom() {
+    private fun scrollToBottom() {
         runOnUiThread {
             scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
         }
     }
 }
-
-
