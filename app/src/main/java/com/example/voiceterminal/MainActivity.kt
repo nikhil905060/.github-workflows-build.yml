@@ -7,8 +7,10 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.widget.Button
@@ -169,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     private fun processNaturalLanguageWithAI(promptText: String) {
         val activeKey = getActiveApiKey()
         if (activeKey.isEmpty()) {
-            tvTerminalOutput.append("\n[System Error]: API Key set nahi hai! Menu -> 'Set Gemini API Key' me jakar key paste karo.\n$ ")
+            tvTerminalOutput.append("\n[System Error]: API Key set nahi hai! Menu -> 'Set Gemini API Key' me paste karo.\n$ ")
             scrollToBottom()
             return
         }
@@ -179,7 +181,6 @@ class MainActivity : AppCompatActivity() {
 
         thread {
             try {
-                // Updated to gemini-3.8-flash endpoint
                 val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
@@ -187,7 +188,32 @@ class MainActivity : AppCompatActivity() {
                 conn.setRequestProperty("x-goog-api-key", activeKey)
                 conn.doOutput = true
 
-                val systemInstruction = "Convert user request into one of these: ACTION:TORCH_ON, ACTION:TORCH_OFF, ACTION:VOL_UP, ACTION:VOL_DOWN, ACTION:VOL_MUTE, ACTION:READ_NOTIFICATIONS, ACTION:HOME, OPEN:<AppName>, or CMD:<shell command>. Output ONLY the single command without markdown or quotes."
+                val systemInstruction = """
+                    You are a voice assistant operating a terminal on an unrooted Android device.
+                    Your goal: ALWAYS fulfill the user intent as far as possible (Best Effort).
+                    If a direct toggle is restricted by Android OS (like mobile data, airplane mode, bluetooth toggle, hotspot), redirect them by opening the exact settings panel.
+                    Choose ONE prefix:
+                    ACTION:TORCH_ON (turn flashlight on)
+                    ACTION:TORCH_OFF (turn flashlight off)
+                    ACTION:VOL_UP (raise volume)
+                    ACTION:VOL_DOWN (lower volume)
+                    ACTION:VOL_MUTE (mute volume)
+                    ACTION:DATA_SETTINGS (for data on/off, internet, cellular)
+                    ACTION:WIFI_SETTINGS (for wifi settings)
+                    ACTION:BLUETOOTH_SETTINGS (for bluetooth)
+                    ACTION:HOTSPOT_SETTINGS (for hotspot / tethering)
+                    ACTION:AIRPLANE_SETTINGS (for flight / airplane mode)
+                    ACTION:DISPLAY_SETTINGS (for brightness / screen timeout)
+                    ACTION:BATTERY_SETTINGS (for battery / power saving)
+                    ACTION:READ_NOTIFICATIONS (to view recent notifications)
+                    ACTION:HOME (go to home screen)
+                    ACTION:CAMERA (open camera)
+                    OPEN:<AppName> (launch any installed app, e.g. OPEN:YouTube, OPEN:WhatsApp, OPEN:Chrome, OPEN:Gallery, OPEN:Calculator)
+                    SEARCH:<query> (search Google in browser)
+                    CMD:<shell command> (only safe commands like ls, pwd, date, uname, uptime)
+                    SAY:<response> (for normal conversations, greetings, questions)
+                    Respond ONLY with that single command, no quotes, no markdown.
+                """.trimIndent()
 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().apply {
@@ -236,6 +262,10 @@ class MainActivity : AppCompatActivity() {
         when {
             action.startsWith("ACTION:") -> executeDeviceAction(action.removePrefix("ACTION:").trim())
             action.startsWith("OPEN:") -> launchApp(action.removePrefix("OPEN:").trim())
+            action.startsWith("SEARCH:") -> searchWeb(action.removePrefix("SEARCH:").trim())
+            action.startsWith("SAY:") -> {
+                tvTerminalOutput.append("[Terminal]: " + action.removePrefix("SAY:").trim() + "\n$ ")
+            }
             action.startsWith("CMD:") -> executeCommand(action.removePrefix("CMD:").trim())
             else -> executeCommand(action)
         }
@@ -269,13 +299,70 @@ class MainActivity : AppCompatActivity() {
                     audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
                     tvTerminalOutput.append("[Success]: Volume MUTED\n$ ")
                 }
+                "DATA_SETTINGS" -> {
+                    val intent = Intent(Settings.ACTION_DATA_ROAMING_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Android security restricts direct data toggle. Opened Network Settings for you.\n$ ")
+                }
+                "WIFI_SETTINGS" -> {
+                    val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Wi-Fi Settings.\n$ ")
+                }
+                "BLUETOOTH_SETTINGS" -> {
+                    val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Bluetooth Settings.\n$ ")
+                }
+                "HOTSPOT_SETTINGS" -> {
+                    val intent = Intent().apply {
+                        action = "android.settings.TETHER_SETTINGS"
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Hotspot & Tethering Settings.\n$ ")
+                }
+                "AIRPLANE_SETTINGS" -> {
+                    val intent = Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Flight Mode Settings.\n$ ")
+                }
+                "DISPLAY_SETTINGS" -> {
+                    val intent = Intent(Settings.ACTION_DISPLAY_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Display Settings.\n$ ")
+                }
+                "BATTERY_SETTINGS" -> {
+                    val intent = Intent(Intent.ACTION_POWER_USAGE_SUMMARY).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Best Effort]: Opened Battery Settings.\n$ ")
+                }
+                "CAMERA" -> {
+                    val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    tvTerminalOutput.append("[Success]: Opened Camera\n$ ")
+                }
                 "HOME" -> {
                     val home = Intent(Intent.ACTION_MAIN).apply {
                         addCategory(Intent.CATEGORY_HOME)
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
                     startActivity(home)
-                    tvTerminalOutput.append("[Success]: Home\n$ ")
+                    tvTerminalOutput.append("[Success]: Returned Home\n$ ")
                 }
                 "READ_NOTIFICATIONS" -> {
                     synchronized(NotificationMonitor.notificationLogs) {
@@ -298,6 +385,19 @@ class MainActivity : AppCompatActivity() {
         scrollToBottom()
     }
 
+    private fun searchWeb(query: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query))).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            tvTerminalOutput.append("[Success]: Searching Google for '$query'\n$ ")
+        } catch (e: Exception) {
+            tvTerminalOutput.append("[Search Failed]: ${e.message}\n$ ")
+        }
+        scrollToBottom()
+    }
+
     private fun launchApp(target: String) {
         val pm = packageManager
         var intent: Intent? = null
@@ -308,7 +408,12 @@ class MainActivity : AppCompatActivity() {
             lower.contains("youtube") -> intent = pm.getLaunchIntentForPackage("com.google.android.youtube")
             lower.contains("whatsapp") -> intent = pm.getLaunchIntentForPackage("com.whatsapp")
             lower.contains("chrome") -> intent = pm.getLaunchIntentForPackage("com.android.chrome")
-            lower.contains("camera") -> intent = Intent("android.media.action.IMAGE_CAPTURE")
+            lower.contains("gallery") || lower.contains("photo") -> intent = Intent(Intent.ACTION_VIEW).apply { type = "image/*" }
+            lower.contains("calculator") -> {
+                intent = pm.getLaunchIntentForPackage("com.google.android.calculator")
+                    ?: pm.getLaunchIntentForPackage("com.android.calculator2")
+                    ?: pm.getLaunchIntentForPackage("com.oneplus.calculator")
+            }
         }
 
         if (intent == null) {
@@ -330,7 +435,7 @@ class MainActivity : AppCompatActivity() {
                 tvTerminalOutput.append("[Launch Failed]: ${e.message}\n$ ")
             }
         } else {
-            tvTerminalOutput.append("[Error]: App '$target' not found\n$ ")
+            tvTerminalOutput.append("[Error]: App '$target' not found on device\n$ ")
         }
         scrollToBottom()
     }
@@ -349,7 +454,7 @@ class MainActivity : AppCompatActivity() {
                 var hasOutput = false
 
                 while (reader.readLine().also { line = it } != null) {
-                    hasOutput = true
+                                        hasOutput = true
                     val out = line
                     runOnUiThread { tvTerminalOutput.append(out + "\n") }
                 }
@@ -401,6 +506,8 @@ class MainActivity : AppCompatActivity() {
     private fun scrollToBottom() {
         runOnUiThread {
             scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
-        }
+                }
     }
 }
+}
+
