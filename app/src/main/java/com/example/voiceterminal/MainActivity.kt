@@ -38,7 +38,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scrollView: ScrollView
 
     private val defaultApiKey = "AIzaSyDYtFapNjj5jqiXs2wtx0KRQB3dJodS0BQ"
-    private var isTorchOn = false
 
     private val voiceLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -91,15 +90,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTerminalMenu() {
         val options = arrayOf(
-            "🔑 Set Gemini API Key",
-            "🔔 Grant Notification Access (Required)",
-            "🧹 Clear Terminal Output",
-            "📱 Show Device Specs",
-            "📋 List Installed Apps"
+            "Set Gemini API Key",
+            "Grant Notification Access",
+            "Clear Terminal",
+            "Device Information",
+            "List User Apps"
         )
 
-        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("[ CONTROL MENU ]")
+        AlertDialog.Builder(this)
+            .setTitle("Terminal Settings")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> showApiKeyDialog()
@@ -120,18 +119,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDeviceInfo() {
         val info = """
-            [DEVICE INFORMATION]
             Model: ${Build.MANUFACTURER.uppercase(Locale.ROOT)} ${Build.MODEL}
-            Android Version: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})
+            Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})
             Hardware: ${Build.HARDWARE}
-            Board: ${Build.BOARD}
         """.trimIndent()
         tvTerminalOutput.append("\n$info\n\n$ ")
         scrollToBottom()
     }
 
     private fun listInstalledApps() {
-        tvTerminalOutput.append("\n[FETCHING INSTALLED APPS...]\n")
+        tvTerminalOutput.append("\n[FETCHING USER APPS...]\n")
         thread {
             val pm = packageManager
             val packages = pm.getInstalledApplications(PackageManager.GET_META_DATA)
@@ -139,7 +136,7 @@ class MainActivity : AppCompatActivity() {
             for (app in packages) {
                 if ((app.flags and ApplicationInfo.FLAG_SYSTEM) == 0) {
                     val label = pm.getApplicationLabel(app).toString()
-                    builder.append("- ").append(label).append(" (").append(app.packageName).append(")\n")
+                    builder.append("- ").append(label).append("\n")
                 }
             }
             runOnUiThread {
@@ -153,15 +150,11 @@ class MainActivity : AppCompatActivity() {
         val currentKey = getActiveApiKey()
         val input = EditText(this).apply {
             hint = "Paste custom Gemini API Key"
-            setTextColor(0xFF00FF00.toInt())
-            setBackgroundColor(0xFF161B22.toInt())
-            setPadding(24, 24, 24, 24)
             setText(if (currentKey == defaultApiKey) "" else currentKey)
         }
 
-        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Config: Gemini API Key")
-            .setMessage("Leave empty to use system default key.")
+        AlertDialog.Builder(this)
+            .setTitle("Gemini API Key")
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newKey = input.text.toString().trim()
@@ -169,20 +162,17 @@ class MainActivity : AppCompatActivity() {
                 if (newKey.isNotEmpty()) {
                     prefs.edit().putString("custom_api_key", newKey).apply()
                     Toast.makeText(this, "API Key Saved", Toast.LENGTH_SHORT).show()
-                    tvTerminalOutput.append("\n[System]: Custom API key set successfully.\n$ ")
                 } else {
                     prefs.edit().remove("custom_api_key").apply()
                     Toast.makeText(this, "Reset to Default Key", Toast.LENGTH_SHORT).show()
-                    tvTerminalOutput.append("\n[System]: Reset to default API key.\n$ ")
                 }
-                scrollToBottom()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun processNaturalLanguageWithAI(promptText: String) {
-        tvTerminalOutput.append("\n[You]: $promptText\n[AI Routing...]\n")
+        tvTerminalOutput.append("\n[You]: $promptText\n[AI Thinking...]\n")
         scrollToBottom()
 
         val activeKey = getActiveApiKey()
@@ -195,20 +185,7 @@ class MainActivity : AppCompatActivity() {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
 
-                val systemInstruction = """
-                    You are an Android OS Master Controller router. 
-                    Analyze the user prompt (Hindi, English, Hinglish) and map it to EXACTLY ONE prefix command:
-
-                    1. Flashlight on/off -> ACTION:TORCH_ON or ACTION:TORCH_OFF
-                    2. Volume increase/decrease/mute -> ACTION:VOL_UP or ACTION:VOL_DOWN or ACTION:VOL_MUTE
-                    3. Notifications check -> ACTION:READ_NOTIFICATIONS
-                    4. Open device settings/wifi/bluetooth -> ACTION:OPEN_SETTINGS or ACTION:OPEN_WIFI or ACTION:OPEN_BLUETOOTH
-                    5. Go to Home screen -> ACTION:HOME
-                    6. Open any application -> OPEN:<AppName> (e.g. 'OPEN:YouTube', 'OPEN:WhatsApp', 'OPEN:Camera')
-                    7. Linux shell / files task -> CMD:<shell command> (e.g. 'CMD:ls /sdcard/Download')
-
-                    Output ONLY the command string. No markdown, no backticks, no explanations.
-                """.trimIndent()
+                val systemInstruction = "Convert user request into one of these: ACTION:TORCH_ON, ACTION:TORCH_OFF, ACTION:VOL_UP, ACTION:VOL_DOWN, ACTION:VOL_MUTE, ACTION:READ_NOTIFICATIONS, ACTION:HOME, OPEN:<AppName>, or CMD:<shell command>. Output ONLY the single command."
 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().apply {
@@ -225,7 +202,7 @@ class MainActivity : AppCompatActivity() {
                     val reader = BufferedReader(InputStreamReader(conn.inputStream))
                     val response = reader.readText()
                     val jsonResponse = JSONObject(response)
-                    val generatedAction = jsonResponse
+                    val action = jsonResponse
                         .getJSONArray("candidates")
                         .getJSONObject(0)
                         .getJSONObject("content")
@@ -236,7 +213,7 @@ class MainActivity : AppCompatActivity() {
                         .replace("`", "")
 
                     runOnUiThread {
-                        handleAiAction(generatedAction)
+                        handleAiAction(action)
                     }
                 } else {
                     val err = conn.errorStream?.bufferedReader()?.readText() ?: "HTTP $responseCode"
@@ -246,7 +223,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    tvTerminalOutput.append("[Network/AI Failed]: ${e.message}\n$ ")
+                    tvTerminalOutput.append("[Network Failed]: ${e.message}\n$ ")
                 }
             }
             scrollToBottom()
@@ -255,22 +232,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleAiAction(action: String) {
         when {
-            action.startsWith("ACTION:") -> {
-                val act = action.removePrefix("ACTION:").trim()
-                executeDeviceAction(act)
-            }
-            action.startsWith("OPEN:") -> {
-                val target = action.removePrefix("OPEN:").trim()
-                tvTerminalOutput.append("[Action]: Opening $target...\n")
-                launchApp(target)
-            }
-            action.startsWith("CMD:") -> {
-                val cmd = action.removePrefix("CMD:").trim()
-                executeCommand(cmd)
-            }
-            else -> {
-                executeCommand(action)
-            }
+            action.startsWith("ACTION:") -> executeDeviceAction(action.removePrefix("ACTION:").trim())
+            action.startsWith("OPEN:") -> launchApp(action.removePrefix("OPEN:").trim())
+            action.startsWith("CMD:") -> executeCommand(action.removePrefix("CMD:").trim())
+            else -> executeCommand(action)
         }
     }
 
@@ -283,51 +248,37 @@ class MainActivity : AppCompatActivity() {
                 "TORCH_ON" -> {
                     val cameraId = cameraManager.cameraIdList[0]
                     cameraManager.setTorchMode(cameraId, true)
-                    isTorchOn = true
-                    tvTerminalOutput.append("[Success]: Flashlight Turned ON\n$ ")
+                    tvTerminalOutput.append("[Success]: Flashlight ON\n$ ")
                 }
                 "TORCH_OFF" -> {
                     val cameraId = cameraManager.cameraIdList[0]
                     cameraManager.setTorchMode(cameraId, false)
-                    isTorchOn = false
-                    tvTerminalOutput.append("[Success]: Flashlight Turned OFF\n$ ")
+                    tvTerminalOutput.append("[Success]: Flashlight OFF\n$ ")
                 }
                 "VOL_UP" -> {
                     audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                    tvTerminalOutput.append("[Success]: Volume Increased\n$ ")
+                    tvTerminalOutput.append("[Success]: Volume UP\n$ ")
                 }
                 "VOL_DOWN" -> {
                     audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    tvTerminalOutput.append("[Success]: Volume Decreased\n$ ")
+                    tvTerminalOutput.append("[Success]: Volume DOWN\n$ ")
                 }
                 "VOL_MUTE" -> {
                     audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
-                    tvTerminalOutput.append("[Success]: Volume Muted\n$ ")
-                }
-                "OPEN_SETTINGS" -> {
-                    startActivity(Intent(Settings.ACTION_SETTINGS))
-                    tvTerminalOutput.append("[Success]: Settings opened\n$ ")
-                }
-                "OPEN_WIFI" -> {
-                    startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                    tvTerminalOutput.append("[Success]: WiFi Settings opened\n$ ")
-                }
-                "OPEN_BLUETOOTH" -> {
-                    startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    tvTerminalOutput.append("[Success]: Bluetooth Settings opened\n$ ")
+                    tvTerminalOutput.append("[Success]: Volume MUTED\n$ ")
                 }
                 "HOME" -> {
-                    val startMain = Intent(Intent.ACTION_MAIN).apply {
+                    val home = Intent(Intent.ACTION_MAIN).apply {
                         addCategory(Intent.CATEGORY_HOME)
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
-                    startActivity(startMain)
-                    tvTerminalOutput.append("[Success]: Sent to Home Screen\n$ ")
+                    startActivity(home)
+                    tvTerminalOutput.append("[Success]: Home\n$ ")
                 }
                 "READ_NOTIFICATIONS" -> {
                     synchronized(NotificationMonitor.notificationLogs) {
                         if (NotificationMonitor.notificationLogs.isEmpty()) {
-                            tvTerminalOutput.append("[Notifications]: No new notifications captured. (Make sure Notification Access is granted in MENU)\n$ ")
+                            tvTerminalOutput.append("[Notifications]: No logs captured yet. Check Menu -> Grant Access.\n$ ")
                         } else {
                             tvTerminalOutput.append("\n--- RECENT NOTIFICATIONS ---\n")
                             for (log in NotificationMonitor.notificationLogs) {
@@ -337,12 +288,10 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                else -> {
-                    tvTerminalOutput.append("[Unknown Action]: $actionType\n$ ")
-                }
+                else -> tvTerminalOutput.append("[Unknown Action]: $actionType\n$ ")
             }
         } catch (e: Exception) {
-            tvTerminalOutput.append("[Action Failed]: ${e.message}\n$ ")
+            tvTerminalOutput.append("[Action Error]: ${e.message}\n$ ")
         }
         scrollToBottom()
     }
@@ -350,21 +299,21 @@ class MainActivity : AppCompatActivity() {
     private fun launchApp(target: String) {
         val pm = packageManager
         var intent: Intent? = null
-        val lowerTarget = target.lowercase(Locale.ROOT)
+        val lower = target.lowercase(Locale.ROOT)
 
         when {
-            lowerTarget.contains("setting") -> intent = Intent(Settings.ACTION_SETTINGS)
-            lowerTarget.contains("youtube") -> intent = pm.getLaunchIntentForPackage("com.google.android.youtube")
-            lowerTarget.contains("whatsapp") -> intent = pm.getLaunchIntentForPackage("com.whatsapp")
-            lowerTarget.contains("chrome") -> intent = pm.getLaunchIntentForPackage("com.android.chrome")
-            lowerTarget.contains("camera") -> intent = Intent("android.media.action.IMAGE_CAPTURE")
+            lower.contains("setting") -> intent = Intent(Settings.ACTION_SETTINGS)
+            lower.contains("youtube") -> intent = pm.getLaunchIntentForPackage("com.google.android.youtube")
+            lower.contains("whatsapp") -> intent = pm.getLaunchIntentForPackage("com.whatsapp")
+            lower.contains("chrome") -> intent = pm.getLaunchIntentForPackage("com.android.chrome")
+            lower.contains("camera") -> intent = Intent("android.media.action.IMAGE_CAPTURE")
         }
 
         if (intent == null) {
-            val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            for (app in installedApps) {
+            val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            for (app in apps) {
                 val label = pm.getApplicationLabel(app).toString().lowercase(Locale.ROOT)
-                if (label.contains(lowerTarget) || app.packageName.lowercase(Locale.ROOT).contains(lowerTarget)) {
+                if (label.contains(lower) || app.packageName.lowercase(Locale.ROOT).contains(lower)) {
                     intent = pm.getLaunchIntentForPackage(app.packageName)
                     if (intent != null) break
                 }
@@ -374,12 +323,12 @@ class MainActivity : AppCompatActivity() {
         if (intent != null) {
             try {
                 startActivity(intent)
-                tvTerminalOutput.append("[Success]: $target launched.\n$ ")
+                tvTerminalOutput.append("[Success]: Opened $target\n$ ")
             } catch (e: Exception) {
-                tvTerminalOutput.append("[Failed to launch]: ${e.message}\n$ ")
+                tvTerminalOutput.append("[Launch Failed]: ${e.message}\n$ ")
             }
         } else {
-            tvTerminalOutput.append("[Error]: App '$target' not found on this device.\n$ ")
+            tvTerminalOutput.append("[Error]: App '$target' not found\n$ ")
         }
         scrollToBottom()
     }
@@ -410,18 +359,12 @@ class MainActivity : AppCompatActivity() {
 
                 val exitCode = process.waitFor()
                 if (!hasOutput) {
-                    runOnUiThread {
-                        tvTerminalOutput.append("[Exit code: $exitCode]\n$ ")
-                    }
+                    runOnUiThread { tvTerminalOutput.append("[Exit code: $exitCode]\n$ ") }
                 } else {
-                    runOnUiThread {
-                        tvTerminalOutput.append("$ ")
-                    }
+                    runOnUiThread { tvTerminalOutput.append("$ ") }
                 }
             } catch (e: Exception) {
-                runOnUiThread {
-                    tvTerminalOutput.append("[Failed: ${e.message}]\n$ ")
-                }
+                runOnUiThread { tvTerminalOutput.append("[Failed: ${e.message}]\n$ ") }
             }
             scrollToBottom()
         }
