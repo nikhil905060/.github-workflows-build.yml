@@ -4,13 +4,47 @@
     android:layout_height="match_parent"
     android:background="#000000"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:padding="10dp">
 
+    <!-- Top Terminal Header with Menu -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="8dp"
+        android:background="#0D1117">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:text="ROOT@ONEPLUS:~#"
+            android:textColor="#00FF00"
+            android:textSize="14sp"
+            android:paddingStart="8dp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnMenu"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="#161B22"
+            android:fontFamily="monospace"
+            android:text="[MENU]"
+            android:textColor="#00FF00"
+            android:textSize="12sp"
+            android:paddingHorizontal="12dp" />
+    </LinearLayout>
+
+    <!-- Terminal Screen Output -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:paddingVertical="6dp">
 
         <TextView
             android:id="@+id/tvTerminalOutput"
@@ -18,10 +52,11 @@
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
             android:textColor="#00FF00"
-            android:textSize="14sp"
-            android:text="[Voice Terminal Ready]\nType or tap Mic to run command...\n\n" />
+            android:textSize="13sp"
+            android:text="[Voice Terminal Ready]\nTap [MENU] for settings or use Mic/Text below.\n----------------------------------------\n\n" />
     </ScrollView>
 
+    <!-- Bottom Command Controls -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -33,26 +68,33 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="#1A1A1A"
+            android:background="#161B22"
             android:fontFamily="monospace"
-            android:hint="Enter command..."
+            android:hint="Type command or natural prompt..."
             android:padding="10dp"
             android:textColor="#FFFFFF"
-            android:textColorHint="#666666" />
+            android:textColorHint="#555555"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/btnSend"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="Run" />
+            android:layout_marginStart="4dp"
+            android:backgroundTint="#238636"
+            android:fontFamily="monospace"
+            android:text="Run"
+            android:textColor="#FFFFFF" />
 
         <Button
             android:id="@+id/btnMic"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="Mic" />
+            android:layout_marginStart="4dp"
+            android:backgroundTint="#1F6FEB"
+            android:fontFamily="monospace"
+            android:text="Mic"
+            android:textColor="#FFFFFF" />
     </LinearLayout>
 
 </LinearLayout>
